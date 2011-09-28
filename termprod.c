@@ -7,10 +7,13 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <locale.h>
+#include <string.h>
 
 /* Xlib */
 #include <X11/Xlib.h>
 #include <X11/cursorfont.h>
+#include <X11/keysym.h>
+#include <X11/Xutil.h>
 
 /* Imlib2 */
 #include <Imlib2.h>
@@ -32,7 +35,7 @@ struct termprod
      Window root;
      int xscreen, xdepth;
      GC gc;
-     bool running;
+     char buffer[128];
 
      /* Font */
      struct
@@ -77,7 +80,12 @@ tp_x_init(void)
      int d;
      XSetWindowAttributes at =
      {
-          .event_mask = (PropertyChangeMask | SubstructureRedirectMask | SubstructureNotifyMask | StructureNotifyMask),
+          .event_mask = (KeyPressMask
+                    | KeyReleaseMask
+                    | PropertyChangeMask
+                    | SubstructureRedirectMask
+                    | SubstructureNotifyMask
+                    | StructureNotifyMask),
           .cursor = XCreateFontCursor(tp->dpy, XC_xterm)
      };
 
@@ -88,8 +96,6 @@ tp_x_init(void)
      tp->root    = RootWindow(tp->dpy, tp->xscreen);
 
      XChangeWindowAttributes(tp->dpy, tp->root, CWEventMask | CWCursor, &at);
-     XClearWindow(tp->dpy, tp->root);
-     XSetWindowBackground(tp->dpy, tp->root, BGCOLOR);
 
      /* fonte */
      setlocale(LC_CTYPE, "");
@@ -105,29 +111,48 @@ tp_x_init(void)
 
      tp->font.height = tp->font.as + tp->font.de;
 
+     memset(tp->buffer, 0, sizeof(tp->buffer));
+
      if(misschar)
           XFreeStringList(misschar);
-
-     tp->running = true;
-
-     XSync(tp->dpy, false);
 }
 
 static void
 tp_render(void)
 {
+     XClearWindow(tp->dpy, tp->root);
+     XSetWindowBackground(tp->dpy, tp->root, BGCOLOR);
      draw_image(tp->root, 0, 0, LOGOW, LOGOH, LOGOP);
 }
 
 static void
 tp_x_event(XEvent *ev)
 {
+     char tmp[32] = { 0 };
+     KeySym ks;
+
      switch(ev->type)
      {
           case ClientMessage:
                break;
+
           case KeyPress:
-               break;
+               XLookupString(&ev->xkey, tmp, sizeof(tmp), &ks, 0);
+
+               /* Reception d'un '\n', le code est complet. */
+               if(ks == XK_Return)
+               {
+                    printf("CODE: %s\n", tp->buffer);
+
+                    /* script codebare */
+
+                    /* On vide le buffer */
+                    memset(tp->buffer, 0, sizeof(tp->buffer));
+               }
+               else
+                    /* Ajout du numero dans le buffer */
+                    strncat(tp->buffer, tmp, sizeof(tmp));
+
           default:
                break;
      }
@@ -138,9 +163,12 @@ tp_x_loop(void)
 {
      XEvent ev;
 
-     while(XPending(tp->dpy))
-          while(tp->running && !XNextEvent(tp->dpy, &ev))
+     for(;;)
+     {
+          while(!XNextEvent(tp->dpy, &ev))
                tp_x_event(&ev);
+
+     }
 }
 
 int
@@ -153,9 +181,9 @@ main(int argc, char **argv)
      if(!(tp->dpy = XOpenDisplay(NULL)))
      {
           fprintf(stderr, "%s: Can't open X server\n", argv[0]);
+          free(tp);
           exit(EXIT_FAILURE); /* fail */
      }
-
 
      /* Let's go */
      tp_x_init();
