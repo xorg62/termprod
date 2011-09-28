@@ -191,6 +191,9 @@ tp_fixstr(char *str, enum itype t)
                for(i = p = 0; i < strlen(str); ++i)
                     if(isdigit(str[i]) || str[i] == ',')
                          ret[p++] = str[i];
+
+               ret[p] = 'e';
+               ret[p + 1] = '\0';
                break;
      }
 
