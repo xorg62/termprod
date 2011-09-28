@@ -34,6 +34,7 @@
 
 #define SCRIPT "./tpquery.sh"
 
+#define ERRMSG "Produit inexacte."
 
 /* Structures */
 struct termprod
@@ -54,6 +55,8 @@ struct termprod
 
 
 };
+
+enum itype { TYPEID, TYPENAME, TYPEPRIX };
 
 struct termprod *tp;
 
@@ -102,24 +105,6 @@ draw_rect(int x, int y, int w, int h, unsigned int bg)
 {
      XSetForeground(tp->dpy, tp->gc, bg);
      XFillRectangle(tp->dpy, tp->root, tp->gc, x, y, w, h);
-}
-
-static char *
-tp_fixstr(char *str, bool nospace)
-{
-     char *ret = malloc(strlen(str) + 1);
-     int i, p;
-
-     for(i = p = 0; i < strlen(str); ++i)
-          if(isprint(str[i]))
-          {
-               if(nospace && str[i] == ' ')
-                    continue;
-
-               ret[p++] = str[i];
-          }
-
-     return ret;
 }
 
 static void
@@ -180,6 +165,38 @@ tp_init(void)
      tp_render();
 }
 
+static char *
+tp_fixstr(char *str, enum itype t)
+{
+     char *ret = malloc(strlen(str) + 1);
+     int i, p;
+
+     memset(ret, 0, sizeof(ret));
+
+     switch(t)
+     {
+          case TYPEID:
+               for(i = p = 0; i < strlen(str); ++i)
+                    if(isdigit(str[i]))
+                         ret[p++] = str[i];
+               break;
+
+          case TYPENAME:
+               for(i = p = 0; i < strlen(str); ++i)
+                    if(isprint(str[i]) && isascii(str[i]))
+                         ret[p++] = str[i];
+               break;
+
+          case TYPEPRIX:
+               for(i = p = 0; i < strlen(str); ++i)
+                    if(isdigit(str[i]) || str[i] == ',')
+                         ret[p++] = str[i];
+               break;
+     }
+
+     return ret;
+}
+
 static void
 tp_draw_infos(char *infos)
 {
@@ -195,15 +212,29 @@ tp_draw_infos(char *infos)
      /* Code barre */
      if(r)
      {
-          id = tp_fixstr(r, true);
+          id = tp_fixstr(r, TYPEID);
+
           draw_rect(50, 180, textw(id) + (PAD << 2), 38, BGTEXT);
           draw_text(50 + PAD, 205, id);
+     }
+
+     /* Code inexacte */
+     if(!strlen(id))
+     {
+
+          draw_rect(50, 180, textw(ERRMSG) + (PAD << 2), 38, BGTEXT);
+          draw_text(50 + PAD, 205, ERRMSG);
+
+          free(id);
+
+          return;
      }
 
      /* Nom du produit */
      if((r = strtok(NULL, "\n")))
      {
-          name = tp_fixstr(r, false);
+          name = tp_fixstr(r, TYPENAME);
+
           draw_rect(50, 280, textw(name) + (PAD << 2), 38, BGTEXT);
           draw_text(50 + PAD, 305, name);
      }
@@ -211,7 +242,8 @@ tp_draw_infos(char *infos)
      /* Prix */
      if((r = strtok(NULL, "\n")))
      {
-          prix = tp_fixstr(r, true);
+          prix = tp_fixstr(r, TYPEPRIX);
+
           draw_rect(50, 380, textw(prix) + (PAD << 2), 38, BGTEXT);
           draw_text(50 + PAD, 405, prix);
      }
