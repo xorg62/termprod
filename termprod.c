@@ -1,8 +1,9 @@
 /*
  * termprod.c
  *
- * Compilation: cc -lX11 -lImlib2 termprod.c -o termprod
+ * Compilation: cc -lX11 -lImlib2 -lfreetype -lXft -I/usr/include/freetype2 termprod.c -o termprod
  */
+
 /* Standard */
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +11,7 @@
 #include <string.h>
 #include <locale.h>
 #include <ctype.h>
+#include <unistd.h>
 
 /* Xlib */
 #include <X11/Xlib.h>
@@ -21,11 +23,16 @@
 /* Imlib2 */
 #include <Imlib2.h>
 
+/* Xft */
+#include <X11/Xft/Xft.h>
+
 /* Options */
-#define FONT "-*-fixed-*-*-*-*-20-*"
-#define BGCOLOR 0xCCCCCC
-#define BGTEXT  0xAAAAAA
-#define FGTEXT  0x222222
+#define FONT     "mono-20"
+#define FONTPRIX "mono-60"
+#define BGCOLOR   0xCCCCCC
+#define BGTEXT    0xAAAAAA
+#define BORDPRIX  0xFDF100
+#define FGTEXT   "#222222"
 #define PAD 10
 
 #define LOGOP "logo.png"
@@ -34,7 +41,7 @@
 
 #define SCRIPT "./tpquery.sh"
 
-#define ERRMSG "Produit inexacte."
+#define ERRMSG "Produit non disponible."
 
 /* Structures */
 struct termprod
@@ -46,14 +53,8 @@ struct termprod
      Atom atom;
      char buffer[128];
 
-     /* Font */
-     struct
-     {
-          int as, de, width, height;
-          XFontSet fontset;
-     } font;
-
-
+     XftFont *font;
+     XftFont *fontprix;
 };
 
 enum itype { TYPEID, TYPENAME, TYPEPRIX };
@@ -84,20 +85,34 @@ draw_image(int x, int y, int w, int h, char *name)
 }
 
 static inline void
-draw_text(int x, int y, const char *str)
+draw_text(XftFont *f, int x, int y, const char *str)
 {
-     XSetForeground(tp->dpy, tp->gc, FGTEXT);
-     XmbDrawString(tp->dpy, tp->root, tp->font.fontset, tp->gc, x, y, str, strlen(str));
+     XftColor xftcolor;
+     XftDraw *xftd;
+
+          /* Transform X Drawable -> Xft Drawable */
+     xftd = XftDrawCreate(tp->dpy, tp->root, DefaultVisual(tp->dpy, tp->xscreen), DefaultColormap(tp->dpy, tp->xscreen));
+
+     /* Alloc text color */
+     XftColorAllocName(tp->dpy, DefaultVisual(tp->dpy, tp->xscreen),
+               DefaultColormap(tp->dpy, tp->xscreen), FGTEXT, &xftcolor);
+
+     XftDrawStringUtf8(xftd, &xftcolor, f, x, y, (FcChar8 *)str, strlen(str));
+
+     /* Free the text color and XftDraw */
+     XftColorFree(tp->dpy, DefaultVisual(tp->dpy, tp->xscreen), DefaultColormap(tp->dpy, tp->xscreen), &xftcolor);
+
+     XftDrawDestroy(xftd);
 }
 
 static inline unsigned short
-textw(const char *str)
+textw(XftFont *f, const char *str)
 {
-     XRectangle r;
+     XGlyphInfo gl;
 
-     XmbTextExtents(tp->font.fontset, str, strlen(str), NULL, &r);
+     XftTextExtentsUtf8(tp->dpy, f, (FcChar8 *)str, strlen(str), &gl);
 
-     return r.width;
+     return gl.width + f->descent;
 }
 
 static inline void
@@ -112,14 +127,13 @@ tp_render(void)
 {
      XClearWindow(tp->dpy, tp->root);
      XSetWindowBackground(tp->dpy, tp->root, BGCOLOR);
+
      draw_image(0, 0, LOGOW, LOGOH, LOGOP);
 }
 
 static void
 tp_init(void)
 {
-     XFontStruct **xfs = NULL;
-     char **misschar, **names, *defstring;
      int d;
      XSetWindowAttributes at =
      {
@@ -143,24 +157,10 @@ tp_init(void)
      /* Xprop */
      tp->atom = XInternAtom(tp->dpy, "_TERMPROD", false);
 
-     /* fonte */
-     setlocale(LC_CTYPE, "");
-
-     tp->font.fontset = XCreateFontSet(tp->dpy, FONT, &misschar, &d, &defstring);
-
-     XExtentsOfFontSet(tp->font.fontset);
-     XFontsOfFontSet(tp->font.fontset, &xfs, &names);
-
-     tp->font.as    = xfs[0]->max_bounds.ascent;
-     tp->font.de    = xfs[0]->max_bounds.descent;
-     tp->font.width = xfs[0]->max_bounds.width;
-
-     tp->font.height = tp->font.as + tp->font.de;
+     tp->font     = XftFontOpenName(tp->dpy, tp->xscreen, FONT);
+     tp->fontprix = XftFontOpenName(tp->dpy, tp->xscreen, FONTPRIX);
 
      memset(tp->buffer, 0, sizeof(tp->buffer));
-
-     if(misschar)
-          XFreeStringList(misschar);
 
      tp_render();
 }
@@ -168,7 +168,7 @@ tp_init(void)
 static char *
 tp_fixstr(char *str, enum itype t)
 {
-     char *ret = malloc(strlen(str) + 1);
+     char *ret = calloc(strlen(str) + 8, sizeof(char));
      int i, p;
 
      memset(ret, 0, sizeof(ret));
@@ -192,8 +192,7 @@ tp_fixstr(char *str, enum itype t)
                     if(isdigit(str[i]) || str[i] == ',')
                          ret[p++] = str[i];
 
-               ret[p] = 'e';
-               ret[p + 1] = '\0';
+               strcat(ret, "€");
                break;
      }
 
@@ -217,16 +216,16 @@ tp_draw_infos(char *infos)
      {
           id = tp_fixstr(r, TYPEID);
 
-          draw_rect(50, 180, textw(id) + (PAD << 2), 38, BGTEXT);
-          draw_text(50 + PAD, 205, id);
+          draw_rect(50, 180, textw(tp->font, id) + (PAD << 2), 38, BGTEXT);
+          draw_text(tp->font, 50 + PAD, 207, id);
      }
 
      /* Code inexacte */
-     if(!strlen(id))
+     if(!id || !strlen(id))
      {
 
-          draw_rect(50, 180, textw(ERRMSG) + (PAD << 2), 38, BGTEXT);
-          draw_text(50 + PAD, 205, ERRMSG);
+          draw_rect(50, 180, textw(tp->font, ERRMSG) + (PAD << 2), 38, BGTEXT);
+          draw_text(tp->font, 50 + PAD, 207, ERRMSG);
 
           free(id);
 
@@ -238,8 +237,8 @@ tp_draw_infos(char *infos)
      {
           name = tp_fixstr(r, TYPENAME);
 
-          draw_rect(50, 280, textw(name) + (PAD << 2), 38, BGTEXT);
-          draw_text(50 + PAD, 305, name);
+          draw_rect(50, 280, textw(tp->font, name) + (PAD << 2), 38, BGTEXT);
+          draw_text(tp->font, 50 + PAD, 307, name);
      }
 
      /* Prix */
@@ -247,12 +246,12 @@ tp_draw_infos(char *infos)
      {
           prix = tp_fixstr(r, TYPEPRIX);
 
-          draw_rect(50, 380, textw(prix) + (PAD << 2), 38, BGTEXT);
-          draw_text(50 + PAD, 405, prix);
+          draw_rect(50, 440, textw(tp->fontprix, prix) + (PAD << 2) + 2, 84, BORDPRIX);
+          draw_rect(52, 442, textw(tp->fontprix, prix) + (PAD << 2) - 2, 80, BGTEXT);
+          draw_text(tp->fontprix, 48 + PAD, 505, prix);
      }
 
-     printf("-> (%s);(%s);(%s)\n", id, name, prix);
-
+     printf("(%s) (%s) (%s)\n", id, name, prix);
 
      draw_rect(600, 50, 400, 500, BGTEXT);
 
@@ -266,12 +265,14 @@ static void
 tp_x_event(XEvent *ev)
 {
      char tmp[32] = { 0 };
+
      KeySym ks;
 
      switch(ev->type)
      {
           /* Reception des changement au niveau de Xprops */
           case ClientMessage:
+               /* oh, un atom _TERMPROD, c'est surement pour nous! */
                if(ev->xclient.message_type == tp->atom)
                {
                     Atom rt;
@@ -295,10 +296,12 @@ tp_x_event(XEvent *ev)
                /* Reception d'un '\n', le code est complet. */
                if(ks == XK_Return)
                {
-                    printf("Code: %s\n", tp->buffer);
+                    char cmd[128] = { 0 };
 
-                    /* script codebare */
-                    system(SCRIPT);
+                    printf("Code: '%s'\n", tp->buffer);
+
+                    sprintf(cmd, SCRIPT" %s", tp->buffer);
+                    system(cmd);
 
                     /* On vide le buffer */
                     memset(tp->buffer, 0, sizeof(tp->buffer));
@@ -319,8 +322,9 @@ tp_x_loop(void)
 
      for(;;)
      {
-          while(!XNextEvent(tp->dpy, &ev))
-               tp_x_event(&ev);
+          while(XPending(tp->dpy))
+               while(!XNextEvent(tp->dpy, &ev))
+                    tp_x_event(&ev);
 
      }
 }
