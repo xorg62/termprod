@@ -35,21 +35,31 @@ main(int argc, char **argv)
           exit(EXIT_FAILURE);
      }
 
+     e.type = ClientMessage;
+     e.window = ROOT;
+     e.format = 32;
+     e.data.l[0] = 0;
+     e.data.l[1] = 0;
+     e.data.l[2] = 0;
+     e.data.l[3] = 0;
+     e.data.l[4] = true;
+
      /* On modifie la xprop */
-     XChangeProperty(dpy, ROOT, ATOM("_TERMPROD"), XA_STRING,
-                         8, PropModeReplace, (unsigned char*)argv[1], strlen(argv[1]));
-
-     /* On envoie l'event dans le display, le programme principale le recupere */
-     e.type         = ClientMessage;
-     e.message_type = ATOM("_TERMPROD");
-     e.window       = ROOT;
-     e.format       = 32;
-     e.data.l[0]    = 0;
-     e.data.l[1]    = 0;
-     e.data.l[2]    = 0;
-     e.data.l[3]    = 0;
-     e.data.l[4]    = true;
-
+     if(argv[1][0] == 'I'
+        && argv[1][1] == 'M'
+        && argv[1][2] == 'G')
+     {
+          e.message_type = ATOM("_TERMPROD_IMG");
+     }
+     else
+     {
+          XChangeProperty(dpy, ROOT, ATOM("_TERMPROD"), XA_STRING,
+                    8, PropModeReplace, (unsigned char*)argv[1], strlen(argv[1]));
+          
+          /* On envoie l'event dans le display, le programme principale le recupere */
+          e.message_type = ATOM("_TERMPROD");
+     }
+          
      XSendEvent(dpy, ROOT, false, StructureNotifyMask, (XEvent*)&e);
      XSync(dpy, false);
 

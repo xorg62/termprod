@@ -35,11 +35,13 @@
 #define FGTEXT   "#222222"
 #define PAD 10
 
-#define LOGOP "logo.png"
+#define LOGOP  "logo.png"
+#define DEFIMG "noimg.jpg"
 #define LOGOW 300
 #define LOGOH 130
 
 #define SCRIPT "./tpquery.sh"
+#define SCRIPTIMG "./tpimg.sh"
 
 #define ERRMSG "Produit non disponible."
 
@@ -50,8 +52,9 @@ struct termprod
      Window root;
      int xscreen, xdepth;
      GC gc;
-     Atom atom;
+     Atom atom, atomimg;
      char buffer[128];
+     char currentimg[64];
 
      XftFont *font;
      XftFont *fontprix;
@@ -61,9 +64,10 @@ enum itype { TYPEID, TYPENAME, TYPEPRIX };
 
 struct termprod *tp;
 
-static void
+static bool
 draw_image(int x, int y, int w, int h, char *name)
 {
+     bool ret = true;
      Imlib_Image image;
 
      imlib_context_set_display(tp->dpy);
@@ -71,7 +75,12 @@ draw_image(int x, int y, int w, int h, char *name)
      imlib_context_set_colormap(DefaultColormap(tp->dpy, tp->xscreen));
      imlib_context_set_drawable(tp->root);
 
-     image = imlib_load_image(name);
+     if(!(image = imlib_load_image(name)))
+     {
+          image = imlib_load_image(DEFIMG);
+          ret = false;
+     }
+
      imlib_context_set_image(image);
 
      /*
@@ -82,6 +91,8 @@ draw_image(int x, int y, int w, int h, char *name)
      imlib_render_image_on_drawable_at_size(x, y, w, h);
 
      imlib_free_image();
+
+     return ret;
 }
 
 static inline void
@@ -90,7 +101,7 @@ draw_text(XftFont *f, int x, int y, const char *str)
      XftColor xftcolor;
      XftDraw *xftd;
 
-          /* Transform X Drawable -> Xft Drawable */
+     /* Transform X Drawable -> Xft Drawable */
      xftd = XftDrawCreate(tp->dpy, tp->root, DefaultVisual(tp->dpy, tp->xscreen), DefaultColormap(tp->dpy, tp->xscreen));
 
      /* Alloc text color */
@@ -152,10 +163,12 @@ tp_init(void)
      tp->gc      = DefaultGC(tp->dpy, tp->xscreen);
      tp->root    = RootWindow(tp->dpy, tp->xscreen);
 
+     XClearWindow(tp->dpy, tp->root);
      XChangeWindowAttributes(tp->dpy, tp->root, CWEventMask | CWCursor, &at);
 
      /* Xprop */
      tp->atom = XInternAtom(tp->dpy, "_TERMPROD", false);
+     tp->atomimg = XInternAtom(tp->dpy, "_TERMPROD_IMG", false);
 
      tp->font     = XftFontOpenName(tp->dpy, tp->xscreen, FONT);
      tp->fontprix = XftFontOpenName(tp->dpy, tp->xscreen, FONTPRIX);
@@ -188,10 +201,9 @@ tp_fixstr(char *str, enum itype t)
                break;
 
           case TYPEPRIX:
-               for(i = p = 0; i < strlen(str); ++i)
-                    if(isdigit(str[i]) || str[i] == ',')
+               for(i = 2, p = 0; i < strlen(str); ++i)
+                    if(isdigit(str[i]) || str[i] == ' ' || str[i] == ',')
                          ret[p++] = str[i];
-
                strcat(ret, "€");
                break;
      }
@@ -206,39 +218,41 @@ tp_draw_infos(char *infos)
      char *name = NULL;
      char *prix = NULL;
      char *r = strtok(infos, "\n");
+     char imgp[64] = { 0 };
+     int x = 20;
 
-     tp_render();
-
-     /* Parsage de l'infos */
+     draw_image(0, 0, LOGOW, LOGOH, LOGOP);
 
      /* Code barre */
      if(r)
      {
           id = tp_fixstr(r, TYPEID);
 
-          draw_rect(50, 180, textw(tp->font, id) + (PAD << 2), 38, BGTEXT);
-          draw_text(tp->font, 50 + PAD, 207, id);
+          draw_rect(x, 180, textw(tp->font, id) + (PAD << 2), 38, BGTEXT);
+          draw_text(tp->font, x + PAD, 207, id);
      }
 
      /* Code inexacte */
      if(!id || !strlen(id))
      {
 
-          draw_rect(50, 180, textw(tp->font, ERRMSG) + (PAD << 2), 38, BGTEXT);
-          draw_text(tp->font, 50 + PAD, 207, ERRMSG);
+          draw_rect(x, 180, textw(tp->font, ERRMSG) + (PAD << 2), 38, BGTEXT);
+          draw_text(tp->font, x + PAD, 207, ERRMSG);
 
           free(id);
 
           return;
      }
+     else
+          sprintf(tp->currentimg, "m%s.jpg", id);
 
      /* Nom du produit */
      if((r = strtok(NULL, "\n")))
      {
           name = tp_fixstr(r, TYPENAME);
 
-          draw_rect(50, 280, textw(tp->font, name) + (PAD << 2), 38, BGTEXT);
-          draw_text(tp->font, 50 + PAD, 307, name);
+          draw_rect(x, 280, textw(tp->font, name) + (PAD << 2), 38, BGTEXT);
+          draw_text(tp->font, x + PAD, 307, name);
      }
 
      /* Prix */
@@ -246,15 +260,13 @@ tp_draw_infos(char *infos)
      {
           prix = tp_fixstr(r, TYPEPRIX);
 
-          draw_rect(50, 440, textw(tp->fontprix, prix) + (PAD << 2) + 2, 84, BORDPRIX);
-          draw_rect(52, 442, textw(tp->fontprix, prix) + (PAD << 2) - 2, 80, BGTEXT);
-          draw_text(tp->fontprix, 48 + PAD, 505, prix);
+          draw_rect(x, 440, textw(tp->fontprix, prix) + (PAD << 2) + 2, 84, BORDPRIX);
+          draw_rect(x + 2, 442, textw(tp->fontprix, prix) + (PAD << 2) - 2, 80, BGTEXT);
+          draw_text(tp->fontprix, (x - 2) + PAD, 508, prix);
      }
 
      printf("(%s) (%s) (%s)\n", id, name, prix);
-
-     draw_rect(600, 50, 400, 500, BGTEXT);
-
+     
      /* Desallocation */
      free(id);
      free(name);
@@ -277,6 +289,7 @@ tp_x_event(XEvent *ev)
                {
                     Atom rt;
                     int rf;
+                    char cmd[128] = { 0 };
                     unsigned long ir, il;
                     unsigned char *ret = NULL;
 
@@ -284,9 +297,14 @@ tp_x_event(XEvent *ev)
                                    false, XA_STRING, &rt, &rf, &ir, &il, &ret) == Success)
                     {
                          tp_draw_infos((char*)ret);
+                         sprintf(cmd, SCRIPTIMG" %s", tp->currentimg);
+                         system(cmd);
                          XFree(ret);
                     }
                }
+               /* L'image est arrive, affichons */
+               else if(ev->xclient.message_type == tp->atomimg)
+                    draw_image(600, 50, 400, 500, tp->currentimg);
                break;
 
           /* Reception des events clavier (boitié code barre) */
@@ -300,7 +318,7 @@ tp_x_event(XEvent *ev)
 
                     printf("Code: '%s'\n", tp->buffer);
 
-                    sprintf(cmd, SCRIPT" %s", tp->buffer);
+                    sprintf(cmd, SCRIPT" %s &", tp->buffer);
                     system(cmd);
 
                     /* On vide le buffer */
