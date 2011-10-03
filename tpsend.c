@@ -45,21 +45,21 @@ main(int argc, char **argv)
      e.data.l[4] = true;
 
      /* On modifie la xprop */
-     if(argv[1][0] == 'I'
-        && argv[1][1] == 'M'
-        && argv[1][2] == 'G')
+     /* if(argv[1][0] == 'I'
+         && argv[1][1] == 'M'
+         && argv[1][2] == 'G')
      {
           e.message_type = ATOM("_TERMPROD_IMG");
      }
      else
-     {
-          XChangeProperty(dpy, ROOT, ATOM("_TERMPROD"), XA_STRING,
-                    8, PropModeReplace, (unsigned char*)argv[1], strlen(argv[1]));
-          
-          /* On envoie l'event dans le display, le programme principale le recupere */
-          e.message_type = ATOM("_TERMPROD");
-     }
-          
+     */
+
+     XChangeProperty(dpy, ROOT, ATOM("_TERMPROD"), XA_STRING,
+               8, PropModeReplace, (unsigned char*)argv[1], strlen(argv[1]));
+
+     /* On envoie l'event dans le display, le programme principale le recupere */
+     e.message_type = ATOM("_TERMPROD");
+
      XSendEvent(dpy, ROOT, false, StructureNotifyMask, (XEvent*)&e);
      XSync(dpy, false);
 

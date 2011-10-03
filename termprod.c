@@ -5,6 +5,8 @@
  */
 
 /* Standard */
+#define _GNU_SOURCE /* strcasecmp() */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -28,22 +30,24 @@
 
 /* Options */
 #define FONT     "mono-20"
+#define FONTNAME "mono-22"
 #define FONTPRIX "mono-60"
 #define BGCOLOR   0xCCCCCC
 #define BGTEXT    0xAAAAAA
 #define BORDPRIX  0xFDF100
 #define FGTEXT   "#222222"
-#define PAD 10
+#define PAD 3
 
 #define LOGOP  "logo.png"
 #define DEFIMG "noimg.jpg"
-#define LOGOW 300
-#define LOGOH 130
+#define LOGOW 370
+#define LOGOH 215
 
 #define SCRIPT "./tpquery.sh"
 #define SCRIPTIMG "./tpimg.sh"
 
-#define ERRMSG "Produit non disponible."
+#define ERRMSG  "Produit non disponible."
+#define ERRNAME "Code Inex !"
 
 /* Structures */
 struct termprod
@@ -54,9 +58,9 @@ struct termprod
      GC gc;
      Atom atom, atomimg;
      char buffer[128];
-     char currentimg[64];
 
      XftFont *font;
+     XftFont *fontname;
      XftFont *fontprix;
 };
 
@@ -171,6 +175,7 @@ tp_init(void)
      tp->atomimg = XInternAtom(tp->dpy, "_TERMPROD_IMG", false);
 
      tp->font     = XftFontOpenName(tp->dpy, tp->xscreen, FONT);
+     tp->fontname = XftFontOpenName(tp->dpy, tp->xscreen, FONTNAME);
      tp->fontprix = XftFontOpenName(tp->dpy, tp->xscreen, FONTPRIX);
 
      memset(tp->buffer, 0, sizeof(tp->buffer));
@@ -219,54 +224,72 @@ tp_draw_infos(char *infos)
      char *prix = NULL;
      char *r = strtok(infos, "\n");
      char imgp[64] = { 0 };
-     int x = 20;
+     int x = 5, y;
 
-     draw_image(0, 0, LOGOW, LOGOH, LOGOP);
+     tp_render();
 
-     /* Code barre */
+     /*
+      * Code barre
+      */
      if(r)
      {
+          y = 250;
           id = tp_fixstr(r, TYPEID);
 
-          draw_rect(x, 180, textw(tp->font, id) + (PAD << 2), 38, BGTEXT);
-          draw_text(tp->font, x + PAD, 207, id);
+          draw_rect(x, y, textw(tp->font, id) + (PAD << 2), 40, BGTEXT);
+          draw_text(tp->font, x + PAD, y + 31, id);
      }
 
-     /* Code inexacte */
-     if(!id || !strlen(id))
+     /*
+      * Nom du produit
+      */
+     if((r = strtok(NULL, "\n")))
      {
+          y = 350;
+          name = tp_fixstr(r, TYPENAME);
 
-          draw_rect(x, 180, textw(tp->font, ERRMSG) + (PAD << 2), 38, BGTEXT);
-          draw_text(tp->font, x + PAD, 207, ERRMSG);
+          draw_rect(x, y, textw(tp->fontname, name) + (PAD << 2), 40, BGTEXT);
+          draw_text(tp->fontname, x + PAD, y + 31, name);
+     }
+
+     /*
+      * Prix
+      */
+     if((r = strtok(NULL, "\n")))
+     {
+          y = 467;
+          prix = tp_fixstr(r, TYPEPRIX);
+
+          draw_rect(x, y, textw(tp->fontprix, prix) + (PAD << 2) + 2, 84, BORDPRIX);
+          draw_rect(x + 2, y + 2, textw(tp->fontprix, prix) + (PAD << 2) - 2, 80, BGTEXT);
+          draw_text(tp->fontprix, (x - 2) + PAD, y + 69, prix);
+     }
+
+     /*
+      * Image
+      */
+     sprintf(imgp, "cache/m%s.jpg", id);
+     draw_image(575, 50, 575 - 1020, 500, imgp);
+
+
+     /*
+      * Code inexacte
+      */
+     if(!id || !strlen(id)              /* pas d'ID */
+         || !strcasecmp(name, ERRNAME)) /* "Code Inex !" dans le nom */
+     {
+          y = 250;
+          draw_rect(x, y, textw(tp->font, ERRMSG) + (PAD << 2), 40, BGTEXT);
+          draw_text(tp->font, x + PAD, y + 31, ERRMSG);
 
           free(id);
 
           return;
      }
-     else
-          sprintf(tp->currentimg, "m%s.jpg", id);
 
-     /* Nom du produit */
-     if((r = strtok(NULL, "\n")))
-     {
-          name = tp_fixstr(r, TYPENAME);
-
-          draw_rect(x, 280, textw(tp->font, name) + (PAD << 2), 38, BGTEXT);
-          draw_text(tp->font, x + PAD, 307, name);
-     }
-
-     /* Prix */
-     if((r = strtok(NULL, "\n")))
-     {
-          prix = tp_fixstr(r, TYPEPRIX);
-
-          draw_rect(x, 440, textw(tp->fontprix, prix) + (PAD << 2) + 2, 84, BORDPRIX);
-          draw_rect(x + 2, 442, textw(tp->fontprix, prix) + (PAD << 2) - 2, 80, BGTEXT);
-          draw_text(tp->fontprix, (x - 2) + PAD, 508, prix);
-     }
-
+     /* DEBUG */
      printf("(%s) (%s) (%s)\n", id, name, prix);
-     
+
      /* Desallocation */
      free(id);
      free(name);
@@ -297,14 +320,9 @@ tp_x_event(XEvent *ev)
                                    false, XA_STRING, &rt, &rf, &ir, &il, &ret) == Success)
                     {
                          tp_draw_infos((char*)ret);
-                         sprintf(cmd, SCRIPTIMG" %s", tp->currentimg);
-                         system(cmd);
                          XFree(ret);
                     }
                }
-               /* L'image est arrive, affichons */
-               else if(ev->xclient.message_type == tp->atomimg)
-                    draw_image(600, 50, 400, 500, tp->currentimg);
                break;
 
           /* Reception des events clavier (boitié code barre) */
